@@ -7,6 +7,13 @@ output: html_document
 knitr::opts_chunk$set(fig.width=6, fig.height=4, fig.path='Figs/', echo=TRUE, tidy=TRUE, message=F, warning=F, cache=T)
 ```
 
+## install Gazer 
+I had some trouble getting this to go and had to mannually install some of the needed packages (ggforce).
+
+library(devtools)
+install_github("dmirman/gazer")
+library(ggforce)
+
 ## 15 second subset of data for demonstration purposes
 
 Read in and plot the data
@@ -102,7 +109,7 @@ ggplot(data=mad_removal, aes(x=time, y=interp)) + geom_point() + ylim(400, 1200)
 ### (currectly set to 20 for demo purposes)
 uses a moving average to smooth 
 ```{r }
-rolling_mean_pupil_average <- as.data.frame(pup_interp) %>% #must be in a data.frame
+rolling_mean_pupil_average <- as.data.frame(mad_removal) %>% #must be in a data.frame
   select(
     subject, trial, pupil, 
     time, interp, sample_message) %>%
