@@ -135,9 +135,9 @@ ggplot(data=baseline_pupil, aes(x=time, y=baselinecorrectedp)) + geom_point() + 
 uses formula to change from abitrary unit to mm (we need to change this formula to fit our setup!!)
 ```{r }
 timebinsmm <- rolling_mean_pupil_average  %>% 
-  mutate(pupilmm = (movingavgpup * 5)/5570.29)
+  mutate(pupilmm = (sqrt(movingavgpup) * (0.119789246)))
 
-ggplot(data=timebinsmm, aes(x=time, y=pupilmm)) + geom_point() + ylim(.5, 1.1)
+ggplot(data=timebinsmm, aes(x=time, y=pupilmm)) + geom_point() + 
 ```
 
 
@@ -153,7 +153,7 @@ baseline_pupil_onset <- timebinsmm %>%
     subject, trial, time, time_zero, 
     sample_message, pupilmm)
 
-ggplot(data=baseline_pupil_onset, aes(x=time_zero, y=pupilmm)) + geom_point() + ylim(.5, 1.1)
+ggplot(data=baseline_pupil_onset, aes(x=time_zero, y=pupilmm)) + geom_point() 
 ```
 
 ## Binning
@@ -172,5 +172,5 @@ agg_subject<- timebins1 %>%
   dplyr::summarise(aggbaseline=mean(pupilmm)) %>% 
   ungroup()
 
-ggplot(data=agg_subject, aes(x=timebins, y=aggbaseline)) + geom_point() + geom_line(size = 1) + ylim(.5, 1.1)
+ggplot(data=agg_subject, aes(x=timebins, y=aggbaseline)) + geom_point() + geom_line(size = 1) 
 ```
