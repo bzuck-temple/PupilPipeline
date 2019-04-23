@@ -1,0 +1,204 @@
+---
+title: "Pupil Yes/No Pilot Data Processed using GazeR"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.height=4, fig.path='Figs/', echo=TRUE, tidy=TRUE, message=F, warning=F, cache=T)
+```
+
+## Install Gazer 
+I had some trouble getting this to go and had to mannually install some of the needed packages (ggforce).
+
+library(devtools)
+install_github("dmirman/gazer")
+library(ggforce)
+
+## Read in data
+Pupil data exported as individual reports for each participant and aggregated using merge_pupil function.
+
+```{r }
+
+library(tidyverse)
+library(gazer)
+library(dplyr)
+
+file_list <-list.files(".", pattern = ".xls")
+pupil_files <- merge_pupil(
+  file_list,
+  blink_colname = "AVERAGE_IN_BLINK",
+  pupil_colname = "AVERAGE_PUPIL_SIZE"
+)
+
+```
+
+## 'Missingness'
+Remove participants AND trials that have greater than a specified threshold of missing values (here 20%)
+
+```{r eval=TRUE, warning=TRUE, error =TRUE, message=TRUE}
+pup_missing <- count_missing_pupil(pupil_files, missingthresh = .2)
+
+```
+
+## De-blink
+
+remove blinks AND 100ms window on each side of blink
+```{r }
+pup_extend<- pup_missing %>% 
+  group_by(subject, trial) %>% 
+  mutate(extendpupil=extend_blinks(pupil, fillback=100, fillforward=100, hz=1000))
+
+```
+
+## Removing other bad data 
+Plot a histogram and visually examine to determine what values are unlikely to be real measurements (based on recommendation by Mathot?). Alternatively we could set a threshold independently.
+
+```{r }
+
+puphist <- ggplot(pup_extend, aes(x = extendpupil)) + 
+  geom_histogram(aes(y = ..count..), colour = "green", binwidth = 0.5)  + 
+  geom_vline(xintercept = 850, linetype="dotted") +
+  geom_vline(xintercept = 1500, linetype="dotted") + 
+  xlab("Pupil Size") + 
+  ylab("Count") + 
+  theme_bw() 
+
+print(puphist)
+```
+
+```{r }
+pup_outliers <- pup_extend %>% 
+  filter(extendpupil >= 850, extendpupil <= 1500)
+
+puphist_noOutliers <- ggplot(pup_outliers, aes(x = extendpupil)) + 
+  geom_histogram(aes(y = ..count..), colour = "green", binwidth = 0.5)  + 
+  geom_vline(xintercept = 850, linetype="dotted") +
+  geom_vline(xintercept = 1500, linetype="dotted") + 
+  xlab("Pupil Size") + 
+  ylab("Count") + 
+  theme_bw() 
+
+print(puphist_noOutliers)
+```
+
+
+## Interpolate 
+
+Performs a linear interpolation of missing values
+```{r }
+pup_interp <- interpolate_pupil(
+  pup_outliers, 
+  extendblinks = TRUE, 
+  type = "linear")
+
+```
+
+## MAD (speed of dialation)
+
+May need to perform interpolation again after this step. MAD can not be performed with NAs in the dataset; at this time it must occur after interpolation. 
+
+```{r }
+mad_removal <- pup_interp %>%
+  group_by(subject, trial) %>%
+  mutate(speed=speed_pupil(interp,time)) %>%
+  mutate(MAD=calc_mad(speed)) %>%
+  filter(speed < MAD)
+
+#ggplot(data=mad_removal, aes(x=time, y=interp, colour = factor(subject))) + geom_point() + ylim(400, 1200) + facet_grid(cond ~ .)
+
+```
+
+## Interpolate 
+
+Performs a linear interpolation of missing values
+```{r }
+
+pup_interp2 <- interpolate_pupil(
+  mad_removal, 
+  extendblinks = TRUE, 
+  type = "linear")
+
+```
+
+## Smoothing
+
+Using moving average to smooth; window set to 8
+```{r }
+rolling_mean_pupil_average <- as.data.frame(pup_interp2) %>% #must be in a data.frame
+  select(
+    subject, trial, pupil, 
+    time, interp, sample_message, cond) %>%
+  mutate(movingavgpup = moving_average_pupil(interp, n = 8))
+
+```
+
+
+## Baseline correction
+
+Baseline window set to 1 second long starting at ???
+```{r }
+baseline_pupil <- baseline_correction_pupil(
+  rolling_mean_pupil_average, 
+  pupil_colnames = "movingavgpup", 
+  baseline_window = c(event = c("Baseline_Onset"), event = c("Baseline_Offset")))
+
+#ggplot(data=baseline_pupil, aes(x=time, y=baselinecorrectedp)) + geom_point() + ylim(-300, 300)
+```
+
+## Convert to meaningful units
+### (we need to change this formula to fit our setup!!)
+uses formula to change from abitrary unit to mm (we need to change this formula to fit our setup!!)
+
+```{r }
+timebinsmm <- baseline_pupil  %>% 
+  mutate(pupilmm = (sqrt(movingavgpup) * (0.119789246)))
+
+#ggplot(data=timebinsmm, aes(x=time, y=pupilmm)) + geom_point() + 
+```
+
+## Change trial onset to Zero
+
+```{r }
+baseline_pupil_onset <- timebinsmm %>% 
+  group_by(subject, trial) %>%  
+  mutate(time_zero= onset_pupil(time, sample_message, event = c("Stimulus_Onset") )) %>%
+  ungroup() %>% 
+  filter(time_zero >= 0, time_zero <= 15000) %>%
+  select(
+    subject, trial, time, time_zero, 
+    sample_message, pupilmm, cond)
+
+#ggplot(data=baseline_pupil_onset, aes(x=time_zero, y=pupilmm)) + geom_point() 
+```
+
+
+## Binning and aggregating 
+
+Adds column assinging bins. Bin length set here to 250ms.
+
+```{r }
+
+timebins1 <- downsample_pupil(baseline_pupil_onset, bin.length=250)
+
+head(timebins1)
+```
+
+Group and summarize according to bin by condition
+
+```{r }
+agg_subject <- timebins1 %>% 
+  dplyr::group_by(subject, cond, timebins) %>% 
+  dplyr::summarise(aggbaseline=mean(pupilmm)) %>% 
+  ungroup()
+  
+```
+
+## Plotting
+
+```{r }
+plotByCond <- ggplot(agg_subject, aes(timebins, aggbaseline, color = subject)) +
+  geom_smooth(method = loess) + facet_grid(.~ cond)
+  
+print(plotByCond)
+  
+```
